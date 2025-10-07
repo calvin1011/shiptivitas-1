@@ -4,13 +4,16 @@ import 'dragula/dist/dragula.css';
 import Swimlane from './Swimlane';
 import './Board.css';
 
+// API endpoint for backend server
+const API_URL = 'http://localhost:3001/api/v1/clients';
+
 export default class Board extends React.Component {
   constructor(props) {
     super(props);
-    const clients = this.getClients();
+    // initialize state with empty arrays. data will be fetched from the API.
     this.state = {
       clients: {
-        backlog: clients, // all clients start in the backlog
+        backlog: [],
         inProgress: [],
         complete: [],
       }
@@ -21,42 +24,28 @@ export default class Board extends React.Component {
       complete: React.createRef(),
     }
   }
-  getClients() {
-    return [
-      ['1','Stark, White and Abbott','Cloned Optimal Architecture', 'in-progress'],
-      ['2','Wiza LLC','Exclusive Bandwidth-Monitored Implementation', 'complete'],
-      ['3','Nolan LLC','Vision-Oriented 4Thgeneration Graphicaluserinterface', 'backlog'],
-      ['4','Thompson PLC','Streamlined Regional Knowledgeuser', 'in-progress'],
-      ['5','Walker-Williamson','Team-Oriented 6Thgeneration Matrix', 'in-progress'],
-      ['6','Boehm and Sons','Automated Systematic Paradigm', 'backlog'],
-      ['7','Runolfsson, Hegmann and Block','Integrated Transitional Strategy', 'backlog'],
-      ['8','Schumm-Labadie','Operative Heuristic Challenge', 'backlog'],
-      ['9','Kohler Group','Re-Contextualized Multi-Tasking Attitude', 'backlog'],
-      ['10','Romaguera Inc','Managed Foreground Toolset', 'backlog'],
-      ['11','Reilly-King','Future-Proofed Interactive Toolset', 'complete'],
-      ['12','Emard, Champlin and Runolfsdottir','Devolved Needs-Based Capability', 'backlog'],
-      ['13','Fritsch, Cronin and Wolff','Open-Source 3Rdgeneration Website', 'complete'],
-      ['14','Borer LLC','Profit-Focused Incremental Orchestration', 'backlog'],
-      ['15','Emmerich-Ankunding','User-Centric Stable Extranet', 'in-progress'],
-      ['16','Willms-Abbott','Progressive Bandwidth-Monitored Access', 'in-progress'],
-      ['17','Brekke PLC','Intuitive User-Facing Customerloyalty', 'complete'],
-      ['18','Bins, Toy and Klocko','Integrated Assymetric Software', 'backlog'],
-      ['19','Hodkiewicz-Hayes','Programmable Systematic Securedline', 'backlog'],
-      ['20','Murphy, Lang and Ferry','Organized Explicit Access', 'backlog'],
-    ].map(companyDetails => ({
-      id: companyDetails[0],
-      name: companyDetails[1],
-      description: companyDetails[2],
-      status: companyDetails[3],
-    }));
-  }
-    renderSwimlane(name, clients, ref, status) {
-    return (
-      <Swimlane name={name} clients={clients} dragulaRef={ref} status={status} />
-    );
+
+  // helper function to organize the flat list of clients from the API
+  // into the swimlane structure required by the component's state.
+  processClients = (clientsData) => {
+    // sort clients by priority to ensure they are in the correct order
+    clientsData.sort((a, b) => a.priority - b.priority);
+
+    this.setState({
+      clients: {
+        backlog: clientsData.filter(c => c.status === 'backlog'),
+        inProgress: clientsData.filter(c => c.status === 'in-progress'),
+        complete: clientsData.filter(c => c.status === 'complete'),
+      }
+    });
   }
 
   componentDidMount() {
+    // fetch the initial data from the backend when the component loads.
+    fetch(API_URL)
+      .then(response => response.json())
+      .then(this.processClients);
+
     const statusMap = {
       'backlog': 'backlog',
       'in-progress': 'inProgress',
@@ -71,52 +60,64 @@ export default class Board extends React.Component {
 
     drake.on('drop', (el, target, source, sibling) => {
       drake.cancel(true);
-
       if (!target || !source) return;
 
       const cardId = el.dataset.id;
-      const sourceLaneKey = statusMap[source.dataset.status];
-      const targetLaneKey = statusMap[target.dataset.status];
+      const targetStatus = target.dataset.status;
 
-      const cardToMove = this.state.clients[sourceLaneKey].find(c => c.id === cardId);
+      // calculate the new priority based on the card's position in the target list.
+      // sibling is the next card in the list, so we use its index.
+      // if there's no sibling, the card is at the end, so its priority is the list length + 1.
+      const newPriority = sibling
+        ? this.state.clients[statusMap[targetStatus]].findIndex(c => c.id === parseInt(sibling.dataset.id, 10)) + 1
+        : this.state.clients[statusMap[targetStatus]].length + 1;
+
+      // We'll update the UI immediately for a smooth user experience,
+      // and then sync with the server's response.
+      const allClients = [
+        ...this.state.clients.backlog,
+        ...this.state.clients.inProgress,
+        ...this.state.clients.complete
+      ];
+      const cardToMove = allClients.find(c => c.id === parseInt(cardId, 10));
       if (!cardToMove) return;
 
       const clients = { ...this.state.clients };
+      const sourceLaneKey = statusMap[source.dataset.status];
+      const targetLaneKey = statusMap[target.dataset.status];
 
-      // handle reordering within the same lane
-      if (sourceLaneKey === targetLaneKey) {
-        const laneCards = [...clients[sourceLaneKey]];
-        const cardIndex = laneCards.findIndex(c => c.id === cardId);
+      clients[sourceLaneKey] = clients[sourceLaneKey].filter(c => c.id !== parseInt(cardId, 10));
 
-        // Remove the card from its original position
-        laneCards.splice(cardIndex, 1);
+      const targetCards = [...clients[targetLaneKey]];
+      const insertIndex = sibling
+        ? targetCards.findIndex(c => c.id === parseInt(sibling.dataset.id, 10))
+        : targetCards.length;
 
-        // we find the new insertion index
-        const siblingIndex = sibling ? laneCards.findIndex(c => c.id === sibling.dataset.id) : -1;
-        const insertIndex = siblingIndex >= 0 ? siblingIndex : laneCards.length;
-
-        // then insert the card in its new position
-        laneCards.splice(insertIndex, 0, cardToMove);
-        clients[sourceLaneKey] = laneCards;
-
-      // handle moving between different lanes
-      } else {
-        const newSourceCards = clients[sourceLaneKey].filter(c => c.id !== cardId);
-        const newTargetCards = [...clients[targetLaneKey]];
-
-        const siblingIndex = sibling ? newTargetCards.findIndex(c => c.id === sibling.dataset.id) : -1;
-        const insertIndex = siblingIndex >= 0 ? siblingIndex : newTargetCards.length;
-
-        // update the card's status and add it to the new lane
-        const movedCard = { ...cardToMove, status: target.dataset.status };
-        newTargetCards.splice(insertIndex, 0, movedCard);
-
-        clients[sourceLaneKey] = newSourceCards;
-        clients[targetLaneKey] = newTargetCards;
-      }
+      cardToMove.status = targetStatus;
+      targetCards.splice(insertIndex, 0, cardToMove);
+      clients[targetLaneKey] = targetCards;
 
       this.setState({ clients });
+
+      // API Call to backend
+      // Send the updated status and priority to the server.
+      fetch(`${API_URL}/${cardId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: targetStatus,
+          priority: newPriority
+        }),
+      })
+      .then(response => response.json())
+      .then(this.processClients); // Re-sync with the database state after update.
     });
+  }
+
+  renderSwimlane(name, clients, ref, status) {
+    return (
+      <Swimlane name={name} clients={clients} dragulaRef={ref} status={status} />
+    );
   }
 
   render() {
