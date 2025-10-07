@@ -10,9 +10,9 @@ export default class Board extends React.Component {
     const clients = this.getClients();
     this.state = {
       clients: {
-        backlog: clients.filter(client => !client.status || client.status === 'backlog'),
-        inProgress: clients.filter(client => client.status && client.status === 'in-progress'),
-        complete: clients.filter(client => client.status && client.status === 'complete'),
+        backlog: clients, // all clients start in the backlog
+        inProgress: [],
+        complete: [],
       }
     }
     this.swimlanes = {
@@ -50,10 +50,73 @@ export default class Board extends React.Component {
       status: companyDetails[3],
     }));
   }
-  renderSwimlane(name, clients, ref) {
+    renderSwimlane(name, clients, ref, status) {
     return (
-      <Swimlane name={name} clients={clients} dragulaRef={ref}/>
+      <Swimlane name={name} clients={clients} dragulaRef={ref} status={status} />
     );
+  }
+
+  componentDidMount() {
+    const statusMap = {
+      'backlog': 'backlog',
+      'in-progress': 'inProgress',
+      'complete': 'complete',
+    };
+
+    const drake = Dragula([
+      this.swimlanes.backlog.current,
+      this.swimlanes.inProgress.current,
+      this.swimlanes.complete.current,
+    ]);
+
+    drake.on('drop', (el, target, source, sibling) => {
+      drake.cancel(true);
+
+      if (!target || !source) return;
+
+      const cardId = el.dataset.id;
+      const sourceLaneKey = statusMap[source.dataset.status];
+      const targetLaneKey = statusMap[target.dataset.status];
+
+      const cardToMove = this.state.clients[sourceLaneKey].find(c => c.id === cardId);
+      if (!cardToMove) return;
+
+      const clients = { ...this.state.clients };
+
+      // handle reordering within the same lane
+      if (sourceLaneKey === targetLaneKey) {
+        const laneCards = [...clients[sourceLaneKey]];
+        const cardIndex = laneCards.findIndex(c => c.id === cardId);
+
+        // Remove the card from its original position
+        laneCards.splice(cardIndex, 1);
+
+        // we find the new insertion index
+        const siblingIndex = sibling ? laneCards.findIndex(c => c.id === sibling.dataset.id) : -1;
+        const insertIndex = siblingIndex >= 0 ? siblingIndex : laneCards.length;
+
+        // then insert the card in its new position
+        laneCards.splice(insertIndex, 0, cardToMove);
+        clients[sourceLaneKey] = laneCards;
+
+      // handle moving between different lanes
+      } else {
+        const newSourceCards = clients[sourceLaneKey].filter(c => c.id !== cardId);
+        const newTargetCards = [...clients[targetLaneKey]];
+
+        const siblingIndex = sibling ? newTargetCards.findIndex(c => c.id === sibling.dataset.id) : -1;
+        const insertIndex = siblingIndex >= 0 ? siblingIndex : newTargetCards.length;
+
+        // update the card's status and add it to the new lane
+        const movedCard = { ...cardToMove, status: target.dataset.status };
+        newTargetCards.splice(insertIndex, 0, movedCard);
+
+        clients[sourceLaneKey] = newSourceCards;
+        clients[targetLaneKey] = newTargetCards;
+      }
+
+      this.setState({ clients });
+    });
   }
 
   render() {
@@ -62,13 +125,13 @@ export default class Board extends React.Component {
         <div className="container-fluid">
           <div className="row">
             <div className="col-md-4">
-              {this.renderSwimlane('Backlog', this.state.clients.backlog, this.swimlanes.backlog)}
+              {this.renderSwimlane('Backlog', this.state.clients.backlog, this.swimlanes.backlog, 'backlog')}
             </div>
             <div className="col-md-4">
-              {this.renderSwimlane('In Progress', this.state.clients.inProgress, this.swimlanes.inProgress)}
+              {this.renderSwimlane('In Progress', this.state.clients.inProgress, this.swimlanes.inProgress, 'in-progress')}
             </div>
             <div className="col-md-4">
-              {this.renderSwimlane('Complete', this.state.clients.complete, this.swimlanes.complete)}
+              {this.renderSwimlane('Complete', this.state.clients.complete, this.swimlanes.complete, 'complete')}
             </div>
           </div>
         </div>
